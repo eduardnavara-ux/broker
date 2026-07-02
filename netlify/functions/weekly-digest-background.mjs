@@ -40,7 +40,8 @@ MATERIÁLNÍ (zařaď): nové obchody / velké kontrakty / partnerství, akvizic
 NEMATERIÁLNÍ (zahoď): běžné PR, marketing, rutinní potvrzení ratingů, makrošum, drobné pohyby bez příčiny.
 
 Vrať POUZE validní JSON, nic dalšího:
-{"highlights":[{"ticker":"${p.ticker}","headline":"max 8 slov","detail":"1 věta kontextu","importance":4}],"considerations":["krátká neutrální úvaha (ne pokyn)"]}
+{"highlights":[{"ticker":"${p.ticker}","headline":"max 8 slov","detail":"1 věta kontextu","importance":4,"sentiment":"bullish","url":"https://..."}],"considerations":["krátká neutrální úvaha (ne pokyn)"]}
+Pravidla: "sentiment" je "bullish" (dopad na cenu spíš pozitivní), "bearish" (spíš negativní), nebo "neutral" (nejednoznačný/smíšený). "url" je odkaz na zdrojový článek — použij POUZE skutečnou URL z výsledků hledání; pokud si nejsi jistý, pole url úplně vynech, NIKDY URL nevymýšlej.
 Když nic materiálního není, vrať prázdná pole.`;
 }
 
@@ -82,20 +83,39 @@ async function scanTicker(p, today, apiKey) {
 }
 
 function renderEmail({ today, highlights, considerations, coverage }) {
+  const SENT = {
+    bullish: { label: "▲ bullish", color: "#17734a", bg: "#e4f2ea" },
+    bearish: { label: "▼ bearish", color: "#a83232", bg: "#f7e7e7" },
+    neutral: { label: "◆ neutrální", color: "#7c7b74", bg: "#ececea" },
+  };
   const rows = highlights.length
     ? highlights
-        .map(
-          (h, i) => `
+        .map((h, i) => {
+          const s = SENT[h.sentiment] || SENT.neutral;
+          const safeUrl =
+            typeof h.url === "string" && /^https:\/\//.test(h.url) ? h.url : null;
+          const headline = safeUrl
+            ? `<a href="${safeUrl}" style="color:#191a1c;text-decoration:underline;text-decoration-color:#b9b7ae;">${h.headline}</a>`
+            : h.headline;
+          const readMore = safeUrl
+            ? ` <a href="${safeUrl}" style="font:12px Arial,sans-serif;color:#24427a;text-decoration:none;white-space:nowrap;">číst dál →</a>`
+            : "";
+          return `
       <tr>
-        <td style="padding:14px 16px;border-top:1px solid #dcdad2;vertical-align:top;
+        <td style="padding:14px 14px;border-top:1px solid #dcdad2;vertical-align:top;
                    font:600 13px 'Courier New',monospace;color:#24427a;">${String(i + 1).padStart(2, "0")}</td>
         <td style="padding:14px 16px 14px 0;border-top:1px solid #dcdad2;">
-          <div style="font:11px 'Courier New',monospace;letter-spacing:.1em;color:#7c7b74;">${h.ticker}</div>
-          <div style="font:600 16px Arial,sans-serif;color:#191a1c;margin:2px 0 4px;">${h.headline}</div>
-          <div style="font:14px/1.45 Arial,sans-serif;color:#40413f;">${h.detail}</div>
+          <div style="margin-bottom:6px;">
+            <span style="display:inline-block;background:#24427a;color:#fbfaf6;border-radius:5px;
+                         padding:3px 9px;font:700 12px 'Courier New',monospace;letter-spacing:.08em;">${h.ticker}</span>
+            <span style="display:inline-block;background:${s.bg};color:${s.color};border-radius:5px;
+                         padding:3px 9px;font:600 11px Arial,sans-serif;margin-left:6px;">${s.label}</span>
+          </div>
+          <div style="font:600 16px Arial,sans-serif;color:#191a1c;margin:2px 0 4px;">${headline}</div>
+          <div style="font:14px/1.45 Arial,sans-serif;color:#40413f;">${h.detail}${readMore}</div>
         </td>
-      </tr>`
-        )
+      </tr>`;
+        })
         .join("")
     : `<tr><td colspan="2" style="padding:16px;font:14px Arial,sans-serif;color:#40413f;">
          Tento týden nic zásadního — žádná zpráva neprošla filtrem materiality. To je taky užitečná informace.
@@ -138,6 +158,7 @@ function renderEmail({ today, highlights, considerations, coverage }) {
     ${coverageBlock}
     <p style="font:11px/1.55 Arial,sans-serif;color:#7c7b74;border-top:1px solid #dcdad2;margin-top:28px;padding-top:14px;">
       Přehled je informativní, sestavený z veřejných zdrojů, a nejde o investiční doporučení.
+      Štítky bullish/bearish jsou odhad pravděpodobného směru dopadu, ne signál k obchodu.
       Body „k zvážení" jsou neutrální pozorování, ne pokyny k nákupu či prodeji.
     </p>
   </div>`;
