@@ -1,12 +1,11 @@
-
-// netlify/functions/weekly-digest.mjs
+// netlify/functions/weekly-digest-background.mjs
 // Týdenní puls portfolia — běží automaticky (cron) a posílá digest e-mailem přes Resend.
 //
 // ENV proměnné (Netlify → Site settings → Environment variables):
 //   ANTHROPIC_API_KEY  — klíč z console.anthropic.com
 //   RESEND_API_KEY     — klíč z resend.com
 //   DIGEST_TO          — tvůj e-mail (kam digest chodí)
-//   DIGEST_FROM        — ověřený odesílatel v Resend, např. "Puls <puls@tvojedomena.cz>"
+//   DIGEST_FROM        — odesílatel, např. "Puls <onboarding@resend.dev>"
 
 // ── Pozice (uprav při změně portfolia) ──────────────────────────────
 const POSITIONS = [
@@ -17,10 +16,15 @@ const POSITIONS = [
   { name: "Warner Bros Discovery", ticker: "WBD",   ccy: "USD" },
   { name: "Pembina Pipeline",      ticker: "PPL",   ccy: "CAD" },
   { name: "Tilray Brands",         ticker: "TLRY",  ccy: "CAD" },
-  { name: "GEVORKYAN",             ticker: "GEV (Praha)",   ccy: "CZK" },
-  { name: "Moneta Money Bank",     ticker: "MONET (Praha)", ccy: "CZK" },
+  { name: "GEVORKYAN",             ticker: "GEV",   ccy: "CZK" },
+  { name: "Moneta Money Bank",     ticker: "MONET", ccy: "CZK" },
   // Wirecard (mrtvý titul) a CSPX (indexový ETF) záměrně nescanujeme.
 ];
+
+// Kolik zpráv maximálně v mailu a kolik nejvýš na jeden titul
+// (aby jeden titul s hodně zprávami nevytlačil ostatní).
+const MAX_HIGHLIGHTS = 8;
+const MAX_PER_TICKER = 2;
 
 const ANTHROPIC_URL = "https://api.anthropic.com/v1/messages";
 const MODEL = "claude-sonnet-4-5"; // případně novější, viz docs.claude.com
@@ -66,13 +70,18 @@ async function scanTicker(p, today, apiKey) {
   const e = clean.lastIndexOf("}");
   if (s < 0 || e < 0) throw new Error(`${p.ticker}: odpověď bez JSON`);
   const parsed = JSON.parse(clean.slice(s, e + 1));
+  // Tickery vždy sjednotíme na náš vlastní (model občas napíše jiný tvar).
+  const hs = (Array.isArray(parsed.highlights) ? parsed.highlights : []).map((h) => ({
+    ...h,
+    ticker: p.ticker,
+  }));
   return {
-    highlights: Array.isArray(parsed.highlights) ? parsed.highlights : [],
+    highlights: hs,
     considerations: Array.isArray(parsed.considerations) ? parsed.considerations : [],
   };
 }
 
-function renderEmail({ today, highlights, considerations, failed }) {
+function renderEmail({ today, highlights, considerations, coverage }) {
   const rows = highlights.length
     ? highlights
         .map(
@@ -99,9 +108,23 @@ function renderEmail({ today, highlights, considerations, failed }) {
        </ul>`
     : "";
 
-  const fail = failed.length
-    ? `<p style="font:12px Arial,sans-serif;color:#a83232;">Nepodařilo se prověřit: ${failed.join(", ")}.</p>`
-    : "";
+  // Přehled pokrytí — které tituly měly zprávu, které byly klidné, které selhaly.
+  const withNews = coverage.filter((c) => c.status === "news").map((c) => c.ticker);
+  const quiet = coverage.filter((c) => c.status === "quiet").map((c) => c.ticker);
+  const failed = coverage.filter((c) => c.status === "failed").map((c) => c.ticker);
+  const line = (label, arr, color) =>
+    arr.length
+      ? `<div style="font:13px/1.6 Arial,sans-serif;color:${color};margin-top:4px;">
+           <strong style="font-weight:600;">${label}:</strong> ${arr.join(", ")}
+         </div>`
+      : "";
+  const coverageBlock = `
+    <h3 style="font:11px 'Courier New',monospace;letter-spacing:.18em;color:#7c7b74;margin:28px 0 8px;">POKRYTÍ</h3>
+    <div style="background:#fbfaf6;border:1px solid #dcdad2;border-radius:12px;padding:14px 16px;">
+      ${line("Se zprávou", withNews, "#191a1c")}
+      ${line("Bez zásadních zpráv", quiet, "#7c7b74")}
+      ${line("Nepodařilo se prověřit", failed, "#a83232")}
+    </div>`;
 
   return `
   <div style="max-width:640px;margin:0 auto;background:#f2f1ec;padding:28px 22px;">
@@ -112,7 +135,7 @@ function renderEmail({ today, highlights, considerations, failed }) {
       ${rows}
     </table>
     ${cons}
-    ${fail}
+    ${coverageBlock}
     <p style="font:11px/1.55 Arial,sans-serif;color:#7c7b74;border-top:1px solid #dcdad2;margin-top:28px;padding-top:14px;">
       Přehled je informativní, sestavený z veřejných zdrojů, a nejde o investiční doporučení.
       Body „k zvážení" jsou neutrální pozorování, ne pokyny k nákupu či prodeji.
@@ -130,9 +153,9 @@ export default async () => {
   }
 
   const today = new Date().toISOString().slice(0, 10);
-  const highlights = [];
+  const allHighlights = [];
   const considerations = [];
-  const failed = [];
+  const coverage = []; // { ticker, status: "news" | "quiet" | "failed" }
 
   // Sekvenčně, s jedním retry na titul — šetrné k rate limitům.
   for (const p of POSITIONS) {
@@ -140,23 +163,36 @@ export default async () => {
     for (let attempt = 0; attempt < 2 && !ok; attempt++) {
       try {
         const r = await scanTicker(p, today, apiKey);
-        highlights.push(...r.highlights);
+        allHighlights.push(...r.highlights);
         considerations.push(...r.considerations);
+        coverage.push({ ticker: p.ticker, status: r.highlights.length ? "news" : "quiet" });
         ok = true;
       } catch (err) {
-        if (attempt === 1) { failed.push(p.ticker); console.error(err); }
+        if (attempt === 1) { coverage.push({ ticker: p.ticker, status: "failed" }); console.error(err); }
         else await new Promise((r) => setTimeout(r, 1500));
       }
     }
   }
 
-  highlights.sort((a, b) => (b.importance || 0) - (a.importance || 0));
+  // Seřadit podle dopadu, ale omezit počet zpráv na jeden titul,
+  // ať jeden „ukecaný" titul nevytlačí ostatní.
+  allHighlights.sort((a, b) => (b.importance || 0) - (a.importance || 0));
+  const perTicker = {};
+  const highlights = [];
+  for (const h of allHighlights) {
+    const t = h.ticker || "—";
+    perTicker[t] = perTicker[t] || 0;
+    if (perTicker[t] >= MAX_PER_TICKER) continue;
+    perTicker[t]++;
+    highlights.push(h);
+    if (highlights.length >= MAX_HIGHLIGHTS) break;
+  }
 
   const html = renderEmail({
     today,
-    highlights: highlights.slice(0, 5),
+    highlights,
     considerations: considerations.slice(0, 3),
-    failed,
+    coverage,
   });
 
   const mail = await fetch("https://api.resend.com/emails", {
