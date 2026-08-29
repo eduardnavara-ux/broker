@@ -314,6 +314,13 @@ async function deepDive(h, today, apiKey) {
 }
 
 // ── Render e-mailu ──────────────────────────────────────────────────
+// Fonty: v e-mailu nelze spolehlivě načíst vlastní písmo (Gmail strhává @font-face),
+// takže sázíme na to, co má uživatel v systému. Georgia je na dlouhý text čitelnější
+// než Arial a je prakticky všude; Consolas/SF Mono jsou hezčí než Courier New.
+const SANS = "-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif";
+const SERIF = "Georgia,'Iowan Old Style','Times New Roman',serif";
+const MONO = "Consolas,'SF Mono',Menlo,'Courier New',monospace";
+
 function safeHttps(u) {
   return typeof u === "string" && /^https:\/\//.test(u) ? u : null;
 }
@@ -329,10 +336,10 @@ function renderEmail({ today, triggers, highlights, watchItems, considerations, 
   const failBanner = allFailed
     ? `
     <div style="background:#f7e7e7;border:1px solid #d9a5a5;border-radius:12px;padding:16px 18px;margin-bottom:26px;">
-      <div style="font:700 15px Arial,sans-serif;color:#a83232;margin-bottom:6px;">
+      <div style="font:700 15.5px ${SANS};color:#a83232;margin-bottom:6px;">
         &#9888; Přehled se nepodařilo sestavit
       </div>
-      <div style="font:13px/1.55 Arial,sans-serif;color:#40413f;">
+      <div style="font:14.5px/1.7 ${SERIF};color:#40413f;">
         Všechny dotazy skončily chybou, takže tenhle mail <strong>neříká, že se nic nestalo</strong> — říká,
         že se nic nepodařilo zjistit. Nejčastější příčina je vyčerpaný kredit na Anthropic API
         (console.anthropic.com &rarr; Plans &amp; Billing). Přesnou chybu najdeš v Netlify &rarr; Functions &rarr; Logs.
@@ -343,7 +350,7 @@ function renderEmail({ today, triggers, highlights, watchItems, considerations, 
   // ── Spouštěče (jen když je co hlásit) ──
   const triggerBlock = triggers.length
     ? `
-    <h3 style="font:11px 'Courier New',monospace;letter-spacing:.18em;color:#7c7b74;margin:0 0 8px;">SPOUŠTĚČE</h3>
+    <h3 style="font:11px ${MONO};letter-spacing:.16em;color:#7c7b74;margin:0 0 8px;">SPOUŠTĚČE</h3>
     <table cellpadding="0" cellspacing="0" style="width:100%;background:#fbfaf6;border:1px solid #dcdad2;border-radius:12px;margin-bottom:26px;">
       ${triggers
         .map((t, i) => {
@@ -355,11 +362,11 @@ function renderEmail({ today, triggers, highlights, watchItems, considerations, 
         <td style="padding:14px 16px;${i ? "border-top:1px solid #dcdad2;" : ""}">
           <div style="margin-bottom:6px;">
             <span style="display:inline-block;background:${badge.bg};color:${badge.color};border-radius:5px;
-                         padding:3px 9px;font:600 11px Arial,sans-serif;">${when}</span>
-            <span style="font:12px 'Courier New',monospace;color:#7c7b74;margin-left:8px;">${t.when}</span>
+                         padding:3px 9px;font:600 11px ${SANS};">${when}</span>
+            <span style="font:12px ${MONO};color:#7c7b74;margin-left:8px;">${t.when}</span>
           </div>
-          <div style="font:600 15px Arial,sans-serif;color:#191a1c;margin:2px 0 4px;">${t.title}</div>
-          <div style="font:13px/1.5 Arial,sans-serif;color:#40413f;">${t.note}</div>
+          <div style="font:600 15.5px/1.35 ${SANS};color:#191a1c;margin:2px 0 4px;">${t.title}</div>
+          <div style="font:14.5px/1.62 ${SERIF};color:#40413f;">${t.note}</div>
         </td>
       </tr>`;
         })
@@ -381,39 +388,39 @@ function renderEmail({ today, triggers, highlights, watchItems, considerations, 
             ? `<a href="${safeUrl}" style="color:#191a1c;text-decoration:underline;text-decoration-color:#b9b7ae;">${h.headline}</a>`
             : h.headline;
           const readMore = safeUrl
-            ? ` <a href="${safeUrl}" style="font:12px Arial,sans-serif;color:#24427a;text-decoration:none;white-space:nowrap;">číst dál →</a>`
+            ? ` <a href="${safeUrl}" style="font:12.5px ${SANS};color:#24427a;text-decoration:none;white-space:nowrap;">číst dál →</a>`
             : "";
           const deep = h.analysis
             ? `
           <div style="margin-top:10px;padding:12px 14px;background:#f2f1ec;border-left:3px solid #24427a;border-radius:0 8px 8px 0;">
-            <div style="font:11px 'Courier New',monospace;letter-spacing:.14em;color:#24427a;margin-bottom:5px;">HLUBŠÍ POHLED</div>
-            <div style="font:13px/1.55 Arial,sans-serif;color:#40413f;">${h.analysis}</div>
+            <div style="font:11px ${MONO};letter-spacing:.13em;color:#24427a;margin-bottom:5px;">HLUBŠÍ POHLED</div>
+            <div style="font:14.5px/1.7 ${SERIF};color:#40413f;">${h.analysis}</div>
           </div>`
             : "";
           return `
       <tr>
         <td style="padding:14px 14px;border-top:1px solid #dcdad2;vertical-align:top;
-                   font:600 13px 'Courier New',monospace;color:#24427a;">${String(i + 1).padStart(2, "0")}</td>
+                   font:600 13px ${MONO};color:#24427a;">${String(i + 1).padStart(2, "0")}</td>
         <td style="padding:14px 16px 14px 0;border-top:1px solid #dcdad2;">
           <div style="margin-bottom:6px;">
             <span style="display:inline-block;background:#24427a;color:#fbfaf6;border-radius:5px;
-                         padding:3px 9px;font:700 12px 'Courier New',monospace;letter-spacing:.08em;">${h.ticker}</span>
+                         padding:3px 9px;font:700 12px ${MONO};letter-spacing:.07em;">${h.ticker}</span>
             <span style="display:inline-block;background:${s.bg};color:${s.color};border-radius:5px;
-                         padding:3px 9px;font:600 11px Arial,sans-serif;margin-left:6px;">${s.label}</span>
+                         padding:3px 9px;font:600 11px ${SANS};margin-left:6px;">${s.label}</span>
           </div>
-          <div style="font:600 16px Arial,sans-serif;color:#191a1c;margin:2px 0 4px;">${headline}</div>
-          <div style="font:14px/1.45 Arial,sans-serif;color:#40413f;">${h.detail}${readMore}</div>
+          <div style="font:600 16.5px/1.35 ${SANS};color:#191a1c;margin:2px 0 4px;">${headline}</div>
+          <div style="font:15px/1.62 ${SERIF};color:#40413f;">${h.detail}${readMore}</div>
           ${deep}
         </td>
       </tr>`;
         })
         .join("")
-    : `<tr><td colspan="2" style="padding:16px;font:14px Arial,sans-serif;color:#40413f;">${emptyMsg}</td></tr>`;
+    : `<tr><td colspan="2" style="padding:16px;font:15px/1.6 ${SERIF};color:#40413f;">${emptyMsg}</td></tr>`;
 
   // ── Sledovaná témata ──
   const watchBlock = watchItems.length
     ? `
-    <h3 style="font:11px 'Courier New',monospace;letter-spacing:.18em;color:#7c7b74;margin:28px 0 8px;">SLEDOVANÉ ZMĚNY</h3>
+    <h3 style="font:11px ${MONO};letter-spacing:.16em;color:#7c7b74;margin:28px 0 8px;">SLEDOVANÉ ZMĚNY</h3>
     <table cellpadding="0" cellspacing="0" style="width:100%;background:#fbfaf6;border:1px solid #dcdad2;border-radius:12px;">
       ${watchItems
         .map((it, i) => {
@@ -422,17 +429,17 @@ function renderEmail({ today, triggers, highlights, watchItems, considerations, 
             ? `<a href="${safeUrl}" style="color:#191a1c;text-decoration:underline;text-decoration-color:#b9b7ae;">${it.headline}</a>`
             : it.headline;
           const readMore = safeUrl
-            ? ` <a href="${safeUrl}" style="font:12px Arial,sans-serif;color:#24427a;text-decoration:none;white-space:nowrap;">číst dál →</a>`
+            ? ` <a href="${safeUrl}" style="font:12.5px ${SANS};color:#24427a;text-decoration:none;white-space:nowrap;">číst dál →</a>`
             : "";
           return `
       <tr>
         <td style="padding:14px 16px;${i ? "border-top:1px solid #dcdad2;" : ""}">
           <div style="margin-bottom:6px;">
             <span style="display:inline-block;background:#5a5f52;color:#fbfaf6;border-radius:5px;
-                         padding:3px 9px;font:600 11px Arial,sans-serif;letter-spacing:.04em;">${it.label}</span>
+                         padding:3px 9px;font:600 11px ${SANS};letter-spacing:.04em;">${it.label}</span>
           </div>
-          <div style="font:600 15px Arial,sans-serif;color:#191a1c;margin:2px 0 4px;">${headline}</div>
-          <div style="font:13px/1.5 Arial,sans-serif;color:#40413f;">${it.detail}${readMore}</div>
+          <div style="font:600 15.5px/1.35 ${SANS};color:#191a1c;margin:2px 0 4px;">${headline}</div>
+          <div style="font:14.5px/1.62 ${SERIF};color:#40413f;">${it.detail}${readMore}</div>
         </td>
       </tr>`;
         })
@@ -441,9 +448,9 @@ function renderEmail({ today, triggers, highlights, watchItems, considerations, 
     : "";
 
   const cons = considerations.length
-    ? `<h3 style="font:11px 'Courier New',monospace;letter-spacing:.18em;color:#7c7b74;margin:28px 0 8px;">K ZVÁŽENÍ</h3>
+    ? `<h3 style="font:11px ${MONO};letter-spacing:.16em;color:#7c7b74;margin:28px 0 8px;">K ZVÁŽENÍ</h3>
        <ul style="margin:0;padding-left:18px;">
-         ${considerations.map((c) => `<li style="font:14px/1.6 Arial,sans-serif;color:#40413f;">${c}</li>`).join("")}
+         ${considerations.map((c) => `<li style="font:15px/1.68 ${SERIF};color:#40413f;">${c}</li>`).join("")}
        </ul>`
     : "";
 
@@ -453,12 +460,12 @@ function renderEmail({ today, triggers, highlights, watchItems, considerations, 
   const failed = coverage.filter((c) => c.status === "failed").map((c) => c.ticker);
   const line = (label, arr, color) =>
     arr.length
-      ? `<div style="font:13px/1.6 Arial,sans-serif;color:${color};margin-top:4px;">
+      ? `<div style="font:13.5px/1.65 ${SANS};color:${color};margin-top:4px;">
            <strong style="font-weight:600;">${label}:</strong> ${arr.join(", ")}
          </div>`
       : "";
   const coverageBlock = `
-    <h3 style="font:11px 'Courier New',monospace;letter-spacing:.18em;color:#7c7b74;margin:28px 0 8px;">POKRYTÍ</h3>
+    <h3 style="font:11px ${MONO};letter-spacing:.16em;color:#7c7b74;margin:28px 0 8px;">POKRYTÍ</h3>
     <div style="background:#fbfaf6;border:1px solid #dcdad2;border-radius:12px;padding:14px 16px;">
       ${line("Se zprávou", withNews, "#191a1c")}
       ${line("Bez zásadních zpráv", quiet, "#7c7b74")}
@@ -467,9 +474,9 @@ function renderEmail({ today, triggers, highlights, watchItems, considerations, 
 
   return `
   <div style="max-width:640px;margin:0 auto;background:#f2f1ec;padding:28px 22px;">
-    <div style="font:11px 'Courier New',monospace;letter-spacing:.18em;color:#7c7b74;">PATRIA · OSOBNÍ ÚČET</div>
-    <h1 style="font:700 26px Arial,sans-serif;color:#191a1c;margin:6px 0 2px;">Týdenní puls portfolia</h1>
-    <div style="font:13px Arial,sans-serif;color:#7c7b74;margin-bottom:20px;">${today} · seřazeno podle dopadu</div>
+    <div style="font:11px ${MONO};letter-spacing:.16em;color:#7c7b74;">PATRIA · OSOBNÍ ÚČET</div>
+    <h1 style="font:700 27px ${SANS};letter-spacing:-.01em;color:#191a1c;margin:6px 0 2px;">Týdenní puls portfolia</h1>
+    <div style="font:13px ${SANS};color:#7c7b74;margin-bottom:22px;">${today} · seřazeno podle dopadu</div>
     ${failBanner}
     ${triggerBlock}
     <table cellpadding="0" cellspacing="0" style="width:100%;background:#fbfaf6;border:1px solid #dcdad2;border-radius:12px;">
@@ -478,7 +485,7 @@ function renderEmail({ today, triggers, highlights, watchItems, considerations, 
     ${watchBlock}
     ${cons}
     ${coverageBlock}
-    <p style="font:11px/1.55 Arial,sans-serif;color:#7c7b74;border-top:1px solid #dcdad2;margin-top:28px;padding-top:14px;">
+    <p style="font:11.5px/1.6 ${SANS};color:#7c7b74;border-top:1px solid #dcdad2;margin-top:28px;padding-top:14px;">
       Přehled je informativní, sestavený z veřejných zdrojů, a nejde o investiční doporučení.
       Štítky bullish/bearish jsou odhad pravděpodobného směru dopadu, ne signál k obchodu.
       Body „k zvážení" a „hlubší pohled" jsou neutrální pozorování, ne pokyny k nákupu či prodeji.
