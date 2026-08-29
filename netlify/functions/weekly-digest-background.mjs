@@ -130,7 +130,9 @@ function upcomingTriggers(todayStr) {
 
 // ── Prompty ─────────────────────────────────────────────────────────
 function buildScanPrompt(p, today) {
-  return `Dnešní datum: ${today}. Mluv česky, tykej. Připravuješ položku do STRUČNÉHO týdenního přehledu pro drobného investora.
+  return `Dnešní datum: ${today}. Připravuješ položku do STRUČNÉHO týdenního přehledu pro drobného investora.
+
+JAZYK — dodrž bezvýhradně: celý výstup piš ČESKY a tykej. To platí i pro pole "headline" a "detail". I když jsou zdrojové články anglicky, přelož je do češtiny. Anglický titulek je chyba. Ponech anglicky jen názvy firem, tickery, zkratky (EBITDA, guidance, EPS) a měny.
 
 Titul: ${p.name} (${p.ticker}, ${p.ccy}).
 
@@ -146,11 +148,14 @@ Pravidla:
 - "importance" je celé číslo 1–5. Buď přísný a použij celou škálu: 5 = mění investiční tezi (ředění akcií, ztráta klíčového kontraktu, odchod CEO, regulační zásah do byznys modelu); 4 = výrazný dopad na ocenění; 3 = stojí za pozornost; 1–2 = spíš šum. Čtyřku a pětku dávej jen tehdy, kdy bys to sám považoval za důvod znovu si promyslet, proč titul držet.
 - "sentiment" je "bullish" (dopad na cenu spíš pozitivní), "bearish" (spíš negativní), nebo "neutral" (nejednoznačný/smíšený).
 - "url" je odkaz na zdrojový článek — použij POUZE skutečnou URL z výsledků hledání; pokud si nejsi jistý, pole url úplně vynech, NIKDY URL nevymýšlej.
+- "considerations" jsou nanejvýš dvě krátké neutrální úvahy v celých, gramaticky správných českých větách. Žádné pomlčky uprostřed myšlenky, žádné zkratkovité poznámky, žádné pokyny k obchodu. Když tě nic pořádného nenapadá, vrať prázdné pole — je to lepší než vata.
 Když nic materiálního není, vrať prázdná pole.`;
 }
 
 function buildWatchPrompt(w, today) {
-  return `Dnešní datum: ${today}. Mluv česky, tykej. Sleduješ pro drobného investora jedno téma a hlásíš POUZE konkrétní změny.
+  return `Dnešní datum: ${today}. Sleduješ pro drobného investora jedno téma a hlásíš POUZE konkrétní změny.
+
+JAZYK — dodrž bezvýhradně: celý výstup piš ČESKY a tykej, včetně polí "headline" a "detail". Anglický titulek je chyba.
 
 Téma: ${w.label}
 Co hledat: ${w.query}
