@@ -189,8 +189,11 @@ Tři pravidla, na kterých záleží:
 2. Když se zpráva ověřením ukáže jako přifouknutá nebo už dávno započtená v ceně, NAPIŠ TO. Vyvrácení je stejně cenné jako potvrzení.
 3. Nespekuluj nad rámec toho, co jsi našel. Když něco není známo, napiš to.
 
-Vrať POUZE validní JSON, nic dalšího:
+FORMÁT ODPOVĚDI — dodrž přesně:
+Až dokončíš hledání, napiš jako úplně první znak odpovědi { a jako poslední }. Žádný úvod, žádné shrnutí před ani za, žádné bloky s uvozovkami kódu. Rozbor patří dovnitř pole "analysis".
+
 {"analysis":"souvislý text, 3-5 vět","revised_importance":4}
+
 "revised_importance" je celé číslo 1–5 — tvoje vlastní přehodnocení důležitosti po ověření.`;
 }
 
@@ -219,20 +222,29 @@ async function callModel({ prompt, apiKey, model, maxTokens = 1500, maxUses = 1 
   const clean = text.replace(/```json|```/g, "").trim();
   const s = clean.indexOf("{");
   const e = clean.lastIndexOf("}");
-  if (s < 0 || e < 0) throw new Error("odpověď bez JSON");
-  return JSON.parse(clean.slice(s, e + 1));
+  let json = null;
+  if (s >= 0 && e > s) {
+    try {
+      json = JSON.parse(clean.slice(s, e + 1));
+    } catch {
+      json = null; // rozbitý JSON — volající se rozhodne, co dál
+    }
+  }
+  return { json, text: clean };
 }
 
 async function scanTicker(p, today, apiKey) {
   let parsed;
   try {
-    parsed = await callModel({
+    const { json } = await callModel({
       prompt: buildScanPrompt(p, today),
       apiKey,
       model: MODEL_SCAN,
       maxTokens: 1500,
       maxUses: 1,
     });
+    if (!json) throw new Error("odpověď bez použitelného JSON");
+    parsed = json;
   } catch (err) {
     throw new Error(`${p.ticker}: ${err.message}`);
   }
@@ -250,13 +262,15 @@ async function scanTicker(p, today, apiKey) {
 async function scanWatch(w, today, apiKey) {
   let parsed;
   try {
-    parsed = await callModel({
+    const { json } = await callModel({
       prompt: buildWatchPrompt(w, today),
       apiKey,
       model: MODEL_SCAN,
       maxTokens: 1200,
       maxUses: 1,
     });
+    if (!json) throw new Error("odpověď bez použitelného JSON");
+    parsed = json;
   } catch (err) {
     throw new Error(`${w.label}: ${err.message}`);
   }
@@ -269,17 +283,29 @@ async function scanWatch(w, today, apiKey) {
 
 async function deepDive(h, today, apiKey) {
   const pos = POSITIONS.find((p) => p.ticker === h.ticker);
-  const parsed = await callModel({
+  const { json, text } = await callModel({
     prompt: buildDeepPrompt(h, pos, today),
     apiKey,
     model: MODEL_DEEP,
-    maxTokens: 1200,
+    maxTokens: 3000, // rozbor + režie web searche; 1200 bylo těsné a odpověď se sekala
     maxUses: 3,
   });
-  return {
-    analysis: typeof parsed.analysis === "string" ? parsed.analysis : null,
-    revised: Number.isInteger(parsed.revised_importance) ? parsed.revised_importance : null,
-  };
+
+  if (json && typeof json.analysis === "string") {
+    return {
+      analysis: json.analysis,
+      revised: Number.isInteger(json.revised_importance) ? json.revised_importance : null,
+    };
+  }
+
+  // Záchrana: JSON se nepovedl, ale text rozboru máme — je to próza, tak ji použijeme.
+  // Lepší mít rozbor bez přehodnocené důležitosti než přijít o něj celý.
+  const salvaged = text.replace(/[{}]/g, " ").replace(/\s+/g, " ").trim();
+  if (salvaged.length > 80) {
+    console.warn(`deepDive ${h.ticker}: JSON se nepovedl, použit surový text`);
+    return { analysis: salvaged.slice(0, 1200), revised: null };
+  }
+  throw new Error("odpověď bez použitelného obsahu");
 }
 
 // ── Render e-mailu ──────────────────────────────────────────────────
