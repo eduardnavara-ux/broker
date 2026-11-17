@@ -42,6 +42,21 @@ const WATCHES = [
       "ČSOB Spoření s bonusem změna úrokové sazby, bonusová sazba, " +
       "podmínky pro TOP sazbu, oznámení o výši bonusové úrokové sazby",
   },
+  {
+    id: "penzijko-csob",
+    label: "ČSOB penzijko",
+    query:
+      "ČSOB Penzijní společnost účastnické fondy: změna poplatků, změna investiční strategie, " +
+      "sloučení nebo transformace fondů, zveřejněné výnosy fondů, změna podmínek smlouvy či převodů",
+  },
+  {
+    id: "penzijko-trh",
+    label: "Penzijko – trh",
+    query:
+      "penzijní společnosti v ČR: srovnání výnosů a poplatků fondů, změny státního příspěvku, " +
+      "odpočtu ze základu daně a příspěvku zaměstnavatele, DIP dlouhodobý investiční produkt, " +
+      "podmínky převodu mezi penzijními společnostmi",
+  },
 ];
 
 // ── Kalendář spouštěčů ──────────────────────────────────────────────
@@ -61,6 +76,11 @@ const TRIGGERS = [
     date: "2027-01-10",
     title: "Účinnost penzijní reformy?",
     note: "Pokud platí strop 0,5 %, zvážit navýšení vkladu na 1 700 Kč (max. státní příspěvek 340 Kč).",
+  },
+  {
+    date: "2027-03-01",
+    title: "Příprava jarního přesunu penzijka",
+    note: "Porovnat fondy, poplatky a podmínky převodu; ověřit u ČSOB lhůty a případné sankce i vliv na státní příspěvek. Navazuje na rozhodnutí 1. 4.",
   },
   {
     date: "2027-04-01",
@@ -162,7 +182,7 @@ Co hledat: ${w.query}
 
 Pomocí web search zjisti, jestli za POSLEDNÍCH 7 DNÍ nastala KONKRÉTNÍ, OVĚŘITELNÁ ZMĚNA.
 
-ZAŘAĎ: schválení nebo zamítnutí ve vládě či sněmovně, hlasování, posun mezi čteními, změna účinnosti, pozměňovací návrh měnící podstatu, publikace ve Sbírce zákonů; u sazeb a poplatků: skutečná změna výše, změna podmínek pro její získání, oznámení banky.
+ZAŘAĎ: schválení nebo zamítnutí ve vládě či sněmovně, hlasování, posun mezi čteními, změna účinnosti, pozměňovací návrh měnící podstatu, publikace ve Sbírce zákonů; u sazeb a poplatků: skutečná změna výše, změna podmínek pro její získání, oznámení banky; u penzijních fondů: změna poplatků, strategie či sloučení fondu, nově zveřejněné výnosy nebo srovnání penzijních společností.
 ZAHOĎ: komentáře, názory, analýzy, spekulace o tom, co by mohlo být, rozhovory, opakování už známého stavu, marketing.
 
 Buď přísný. Když se za týden nic nestalo, je správná odpověď prázdné pole — to je užitečná informace, ne selhání.
@@ -203,7 +223,7 @@ Až dokončíš hledání, napiš jako úplně první znak odpovědi { a jako po
 }
 
 // ── Volání modelu ───────────────────────────────────────────────────
-async function callModel({ prompt, apiKey, model, maxTokens = 1500, maxUses = 1 }) {
+async function callModel({ prompt, apiKey, model, maxTokens = 1500, maxUses = 1, allowedDomains = null }) {
   const res = await fetch(ANTHROPIC_URL, {
     method: "POST",
     headers: {
@@ -215,7 +235,9 @@ async function callModel({ prompt, apiKey, model, maxTokens = 1500, maxUses = 1 
       model,
       max_tokens: maxTokens,
       messages: [{ role: "user", content: prompt }],
-      tools: [{ type: "web_search_20250305", name: "web_search", max_uses: maxUses }],
+      ...(maxUses > 0
+      ? { tools: [{ type: "web_search_20250305", name: "web_search", max_uses: maxUses, ...(allowedDomains ? { allowed_domains: allowedDomains } : {}) }] }
+      : {}),
     }),
   });
   if (!res.ok) throw new Error(`HTTP ${res.status} ${await res.text()}`);
@@ -313,6 +335,155 @@ async function deepDive(h, today, apiKey) {
   throw new Error("odpověď bez použitelného obsahu");
 }
 
+// ── Skejwin (Lukáš Nádvorník) ───────────────────────────────────────
+// Čteme RSS blogu (zdarma, bez API). Když feed nejde, záloha přes web search omezený na skejwin.cz.
+const SKEJWIN_FEED = "https://skejwin.cz/feed/";
+const SKEJWIN_DAYS = 8; // týdenní běh + malá rezerva
+const MAX_SKEJWIN = 3;
+
+function escHtml(s) {
+  return String(s == null ? "" : s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+}
+
+function decodeEntities(s) {
+  return s
+    .replace(/&#(\d+);/g, (_, n) => String.fromCodePoint(Number(n)))
+    .replace(/&#x([0-9a-f]+);/gi, (_, n) => String.fromCodePoint(parseInt(n, 16)))
+    .replace(/&nbsp;/g, " ")
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&amp;/g, "&");
+}
+
+function xmlTag(block, name) {
+  const m = block.match(new RegExp("<" + name + "[^>]*>([\\s\\S]*?)</" + name + ">", "i"));
+  if (!m) return "";
+  return decodeEntities(m[1].replace(/<!\[CDATA\[|\]\]>/g, "").replace(/<[^>]+>/g, " ")).replace(/\s+/g, " ").trim();
+}
+
+async function fetchSkejwinFeed() {
+  const res = await fetch(SKEJWIN_FEED, { headers: { "user-agent": "Mozilla/5.0 (PortfolioPuls)" } });
+  if (!res.ok) throw new Error("Skejwin feed: HTTP " + res.status);
+  const xml = await res.text();
+  const items = [...xml.matchAll(/<item[\s>][\s\S]*?<\/item>/gi)].map((m) => m[0]);
+  if (!items.length) throw new Error("Skejwin feed: bez položek");
+  const all = items
+    .map((it) => ({
+      title: xmlTag(it, "title"),
+      url: xmlTag(it, "link").split("?")[0], // bez utm parametrů
+      date: new Date(xmlTag(it, "pubDate")),
+      excerpt: (xmlTag(it, "description") || xmlTag(it, "content:encoded")).slice(0, 1200),
+    }))
+    .filter((p) => p.title && /^https:\/\//.test(p.url));
+  const cutoff = Date.now() - SKEJWIN_DAYS * 86400000;
+  return { recent: all.filter((p) => p.date.getTime() >= cutoff), latest: all[0] || null };
+}
+
+// Shrnutí vlastními slovy (levný model, bez web searche). Odkazy a data bereme z feedu, ne od modelu.
+async function summarizeSkejwin(posts, apiKey) {
+  const list = posts.map((p, i) => "#" + i + "\nNázev: " + p.title + "\nÚryvek: " + p.excerpt).join("\n\n");
+  const prompt = [
+    "JAZYK: piš česky a tykej.",
+    "Níže jsou nové články blogu Lukáše Nádvorníka (SKEJWIN, nezávislé investování, penzijní reforma).",
+    "Ke každému napiš 1–2 věty VLASTNÍMI SLOVY: o čem je a co z toho plyne pro drobného investora s dlouhým horizontem. Text článku nekopíruj.",
+    '"relevant" je true, pokud se týká penzijka či důchodové reformy, ETF a pasivního investování nebo daní a legislativy investic.',
+    'Vrať POUZE JSON: {"posts":[{"i":0,"summary":"...","relevant":true}]}',
+    "",
+    list,
+  ].join("\n");
+  const { json } = await callModel({ prompt, apiKey, model: MODEL_SCAN, maxTokens: 1200, maxUses: 0 });
+  if (!json) throw new Error("Skejwin: shrnutí bez použitelného JSON");
+  return new Map((Array.isArray(json.posts) ? json.posts : []).map((x) => [x.i, x]));
+}
+
+// Záloha: když RSS nejde, web search omezený na skejwin.cz.
+async function skejwinViaSearch(today, apiKey) {
+  const prompt = [
+    "Dnešní datum: " + today + ". JAZYK: piš česky a tykej.",
+    "Pomocí web search najdi NOVÉ články na blogu skejwin.cz (Lukáš Nádvorník) publikované za posledních " + SKEJWIN_DAYS + " dní.",
+    'Vrať POUZE JSON: {"posts":[{"title":"...","url":"https://skejwin.cz/...","date":"YYYY-MM-DD","summary":"1–2 věty vlastními slovy","relevant":true}]}',
+    '"relevant" je true, pokud se týká penzijka či důchodové reformy, ETF nebo legislativy investic. URL musí být skutečná z výsledků hledání, nic nevymýšlej. Když nic nového nevyšlo, vrať {"posts":[]}.',
+  ].join("\n");
+  const { json } = await callModel({ prompt, apiKey, model: MODEL_SCAN, maxTokens: 1500, maxUses: 2, allowedDomains: ["skejwin.cz"] });
+  if (!json) throw new Error("Skejwin: web search bez použitelného JSON");
+  return (Array.isArray(json.posts) ? json.posts : [])
+    .filter((p) => p.title && typeof p.url === "string" && /^https:\/\/(www\.)?skejwin\.cz\//.test(p.url))
+    .map((p) => ({
+      title: p.title,
+      url: p.url.split("?")[0],
+      date: p.date ? new Date(p.date) : null,
+      summary: p.summary || "",
+      relevant: !!p.relevant,
+    }));
+}
+
+// Nikdy nevyhazuje chybu — selhání Skejwinu nesmí shodit zbytek digestu.
+async function scanSkejwin(today, apiKey) {
+  try {
+    const { recent, latest } = await fetchSkejwinFeed();
+    let posts = [];
+    if (recent.length) {
+      const top = recent.slice(0, MAX_SKEJWIN);
+      let map = new Map();
+      try {
+        map = await summarizeSkejwin(top, apiKey);
+      } catch (err) {
+        console.error("Skejwin shrnutí:", err.message); // článek ukážeme i bez shrnutí
+      }
+      posts = top.map((p, i) => ({
+        ...p,
+        summary: (map.get(i) && map.get(i).summary) || "",
+        relevant: !!(map.get(i) && map.get(i).relevant),
+      }));
+    }
+    return { status: posts.length ? "news" : "quiet", posts, latest };
+  } catch (err) {
+    console.error("Skejwin RSS selhalo, zkouším web search:", err.message);
+    try {
+      const posts = (await skejwinViaSearch(today, apiKey)).slice(0, MAX_SKEJWIN);
+      return { status: posts.length ? "news" : "quiet", posts, latest: null };
+    } catch (err2) {
+      console.error("Skejwin:", err2.message);
+      return { status: "failed", posts: [], latest: null };
+    }
+  }
+}
+
+function renderSkejwin(sk) {
+  if (!sk) return "";
+  const head =
+    '<h3 style="font:11px ' + MONO + ';letter-spacing:.16em;color:#7c7b74;margin:28px 0 8px;">SKEJWIN · LUKÁŠ NÁDVORNÍK</h3>';
+  const box = (inner) =>
+    '<div style="background:#fbfaf6;border:1px solid #dcdad2;border-radius:12px;padding:6px 16px;">' + inner + "</div>";
+  const fmt = (d) => (d && !isNaN(d) ? d.toISOString().slice(0, 10) : "");
+  if (sk.status === "failed") {
+    return head + box('<p style="font:13.5px ' + SANS + ';color:#a83232;">Blog se tento týden nepodařilo zkontrolovat.</p>');
+  }
+  if (!sk.posts.length) {
+    const last = sk.latest ? " Poslední článek: " + escHtml(sk.latest.title) + " (" + fmt(sk.latest.date) + ")." : "";
+    return head + box('<p style="font:14.5px/1.6 ' + SERIF + ';color:#7c7b74;">Tento týden nový článek nevyšel.' + last + "</p>");
+  }
+  const items = sk.posts
+    .map((p, i) => {
+      const badge = p.relevant
+        ? '<span style="display:inline-block;background:#e4ecf7;color:#24427a;border-radius:5px;padding:2px 8px;font:600 11px ' + SANS + ';margin-left:6px;">pro tvé portfolio</span>'
+        : "";
+      const link = escHtml(p.url);
+      return (
+        '<div style="padding:12px 0;' + (i ? "border-top:1px solid #dcdad2;" : "") + '">' +
+        '<div style="font:600 15.5px/1.35 ' + SANS + ';color:#191a1c;"><a href="' + link + '" style="color:#191a1c;text-decoration:underline;text-decoration-color:#b9b7ae;">' + escHtml(p.title) + "</a>" + badge + "</div>" +
+        '<div style="font:12px ' + MONO + ';color:#7c7b74;margin:3px 0 4px;">' + fmt(p.date) + "</div>" +
+        '<div style="font:14.5px/1.62 ' + SERIF + ';color:#40413f;">' + escHtml(p.summary) +
+        ' <a href="' + link + '" style="font:12.5px ' + SANS + ';color:#24427a;text-decoration:none;white-space:nowrap;">číst dál →</a></div>' +
+        "</div>"
+      );
+    })
+    .join("");
+  return head + box(items);
+}
+
 // ── Render e-mailu ──────────────────────────────────────────────────
 // Fonty: v e-mailu nelze spolehlivě načíst vlastní písmo (Gmail strhává @font-face),
 // takže sázíme na to, co má uživatel v systému. Georgia je na dlouhý text čitelnější
@@ -325,7 +496,7 @@ function safeHttps(u) {
   return typeof u === "string" && /^https:\/\//.test(u) ? u : null;
 }
 
-function renderEmail({ today, triggers, highlights, watchItems, considerations, coverage, allFailed }) {
+function renderEmail({ today, triggers, highlights, watchItems, considerations, coverage, allFailed, skejwin }) {
   const SENT = {
     bullish: { label: "▲ bullish", color: "#17734a", bg: "#e4f2ea" },
     bearish: { label: "▼ bearish", color: "#a83232", bg: "#f7e7e7" },
@@ -483,6 +654,7 @@ function renderEmail({ today, triggers, highlights, watchItems, considerations, 
       ${rows}
     </table>
     ${watchBlock}
+    ${renderSkejwin(skejwin)}
     ${cons}
     ${coverageBlock}
     <p style="font:11.5px/1.6 ${SANS};color:#7c7b74;border-top:1px solid #dcdad2;margin-top:28px;padding-top:14px;">
@@ -585,6 +757,9 @@ export default async () => {
   // Po přehodnocení může být pořadí jiné.
   highlights.sort((a, b) => (b.importance || 0) - (a.importance || 0));
 
+  // ── Skejwin ── vlastní blok; jeho selhání nesmí shodit zbytek digestu.
+  const skejwin = await scanSkejwin(today, apiKey);
+
   const html = renderEmail({
     today,
     triggers,
@@ -593,6 +768,7 @@ export default async () => {
     considerations: considerations.slice(0, 3),
     coverage,
     allFailed,
+    skejwin,
   });
 
   // Předmět dá vědět, co se děje, ještě před otevřením.
